@@ -1,8 +1,43 @@
+import csv
+from datetime import date, datetime
+from pathlib import Path
 
-from datetime import date
-
+import altair as alt
+import pandas as pd
 import streamlit as st
 
+SAMPLE_DATA_FILE = Path(__file__).parent / "sample_data.psv"
+
+def load_sample_transactions():
+    """Load the bundled sample_data.psv file into the app's transaction format."""
+    if not SAMPLE_DATA_FILE.exists():
+        st.error(f"ไม่พบไฟล์ข้อมูลตัวอย่าง: {SAMPLE_DATA_FILE.name}")
+        return []
+
+    transactions = []
+
+    with SAMPLE_DATA_FILE.open(
+        "r",
+        encoding="utf-8-sig",
+        newline="",
+    ) as sample_file:
+        reader = csv.DictReader(sample_file, delimiter="|")
+
+        for row in reader:
+            transactions.append(
+                {
+                    "วันที่": datetime.strptime(
+                        row["วันที่"],
+                        "%Y-%m-%d",
+                    ).date(),
+                    "ประเภท": row["ประเภท"],
+                    "หมวดหมู่": row["หมวดหมู่"],
+                    "จำนวนเงิน (บาท)": float(row["จำนวนเงิน"]),
+                    "รายละเอียด": row["รายละเอียด"].strip() or "-",
+                }
+            )
+
+    return transactions
 
 st.set_page_config(
     page_title="FinSight AI",
@@ -10,7 +45,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
 
 st.markdown(
     """
@@ -35,7 +69,7 @@ st.markdown(
     }
 
     .hero {
-        margin-bottom: 2rem;
+        margin-bottom:2rem;
     }
 
     .eyebrow {
@@ -43,13 +77,13 @@ st.markdown(
         font-size: 0.78rem;
         font-weight: 700;
         letter-spacing: 0.16em;
-        margin-bottom: 0.55rem;
+        margin-bottom:0.55rem;
         text-transform: uppercase;
     }
 
     .hero h1 {
         color: var(--ink);
-        font-size: clamp(2.25rem, 4vw, 3.7rem);
+        font-size: clamp(2.25rem, 4vw,3.7rem);
         letter-spacing: -0.055em;
         line-height: 1;
         margin: 0 0 0.8rem;
@@ -66,8 +100,8 @@ st.markdown(
     .summary-card {
         background: var(--surface);
         border: 1px solid var(--line);
-        border-radius: 18px;
-        box-shadow: 0 10px 30px rgba(20, 58, 76, 0.05);
+        border-radius:18px;
+        box-shadow: 0 10px 30px rgba(20,58, 76, 0.05);
     }
 
     [data-testid="stForm"] {
@@ -91,7 +125,7 @@ st.markdown(
         display: flex;
         gap: 1rem;
         justify-content: space-between;
-        margin-bottom: 1rem;
+        margin-bottom:1rem;
         padding: 1rem 1.15rem;
     }
 
@@ -111,7 +145,7 @@ st.markdown(
     div[data-testid="stFormSubmitButton"] button {
         background: var(--brand);
         border: 0;
-        border-radius: 10px;
+        border-radius:10px;
         color: white;
         font-weight: 700;
         min-height: 2.85rem;
@@ -129,7 +163,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 st.markdown(
     """
     <div class="hero">
@@ -141,10 +174,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 if "transactions" not in st.session_state:
-    st.session_state.transactions = []
-
+    st.session_state.transactions = load_sample_transactions()
 
 categories = [
     "เงินเดือน",
@@ -152,13 +183,16 @@ categories = [
     "อาหาร",
     "เดินทาง",
     "ช้อปปิง",
+    "ค่าสาธารณูปโภค",
     "ที่พักอาศัย",
     "หนี้สิน",
     "อื่นๆ",
 ]
 
-
-left_column, right_column = st.columns([0.9, 1.45], gap="large")
+left_column, right_column = st.columns(
+    [0.9, 1.45],
+    gap="large",
+)
 
 with left_column:
     st.markdown(
@@ -167,11 +201,16 @@ with left_column:
     )
 
     st.markdown(
-        '<div class="section-caption">กรอกรายละเอียดรายรับหรือรายจ่ายของคุณ</div>',
+        '<div class="section-caption">'
+        "กรอกรายละเอียดรายรับหรือรายจ่ายของคุณ"
+        "</div>",
         unsafe_allow_html=True,
     )
 
-    with st.form("transaction_form", clear_on_submit=True):
+    with st.form(
+        "transaction_form",
+        clear_on_submit=True,
+    ):
         transaction_date = st.date_input(
             "วันที่",
             value=date.today(),
@@ -218,9 +257,7 @@ with left_column:
                     "รายละเอียด": details.strip() or "-",
                 }
             )
-
             st.success("บันทึกข้อมูลเรียบร้อยแล้ว")
-
 
 with right_column:
     transaction_count = len(st.session_state.transactions)
@@ -244,11 +281,15 @@ with right_column:
         <div class="summary-card">
             <div>
                 <div class="summary-label">รายการทั้งหมด</div>
-                <div class="summary-value">{transaction_count}</div>
+                <div class="summary-value">
+                    {transaction_count}
+                </div>
             </div>
             <div>
                 <div class="summary-label">คงเหลือ</div>
-                <div class="summary-value">{balance:,.2f} บาท</div>
+                <div class="summary-value">
+                    {balance:,.2f} บาท
+                </div>
             </div>
         </div>
         """,
@@ -256,7 +297,9 @@ with right_column:
     )
 
     st.markdown(
-        '<div class="section-heading">รายการทางการเงิน</div>',
+        '<div class="section-heading">'
+        "รายการทางการเงิน"
+        "</div>",
         unsafe_allow_html=True,
     )
 
@@ -276,8 +319,82 @@ with right_column:
                 ),
             },
         )
-    else:
-        st.info(
-            "ยังไม่มีรายการ เริ่มต้นด้วยการบันทึกข้อมูลจากแบบฟอร์มด้านซ้าย"
-        )
 
+        expense_rows = [
+            transaction
+            for transaction in st.session_state.transactions
+            if transaction["ประเภท"] == "รายจ่าย"
+        ]
+
+        if expense_rows:
+            expenses_by_category = {}
+
+            for transaction in expense_rows:
+                category_name = transaction["หมวดหมู่"]
+                expenses_by_category[category_name] = (
+                    expenses_by_category.get(category_name, 0)
+                    + transaction["จำนวนเงิน (บาท)"]
+                )
+
+            chart_data = pd.DataFrame(
+                [
+                    {
+                        "category": category_name,
+                        "amount": total_amount,
+                    }
+                    for category_name, total_amount in expenses_by_category.items()
+                ]
+            )
+
+            st.markdown(
+                '<div class="section-heading chart-heading">'
+                "สัดส่วนรายจ่ายตามหมวดหมู่"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            pie_chart = (
+                alt.Chart(chart_data)
+                .mark_arc(
+                    innerRadius=58,
+                    outerRadius=120,
+                )
+                .encode(
+                    theta=alt.Theta(
+                        "amount:Q",
+                        aggregate="sum",
+                        title="จำนวนเงิน",
+                        scale=alt.Scale(
+                            domain=[
+                                0,
+                                float(chart_data["amount"].sum()),
+                            ]
+                        ),
+                    ),
+                    color=alt.Color(
+                        "category:N",
+                        title="หมวดหมู่",
+                        legend=alt.Legend(orient="right"),
+                    ),
+                    tooltip=[
+                        alt.Tooltip(
+                            "category:N",
+                            title="หมวดหมู่",
+                        ),
+                        alt.Tooltip(
+                            "amount:Q",
+                            title="รายจ่าย",
+                            format=",.2f",
+                        ),
+                    ],
+                )
+                .properties(height=300)
+            )
+
+            st.altair_chart(
+                pie_chart,
+                width="stretch",
+            )
+    else:
+        st.info("ยังไม่มีรายการ เริ่มต้นด้วยการบันทึกข้อมูลจากแบบฟอร์มด้านซ้าย")
+    
