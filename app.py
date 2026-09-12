@@ -1,4 +1,4 @@
-python
+
 from datetime import date
 
 import streamlit as st
