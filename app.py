@@ -1,4 +1,4 @@
-```python
+python
 from datetime import date
 
 import streamlit as st
@@ -280,4 +280,4 @@ with right_column:
         st.info(
             "ยังไม่มีรายการ เริ่มต้นด้วยการบันทึกข้อมูลจากแบบฟอร์มด้านซ้าย"
         )
-```
+
