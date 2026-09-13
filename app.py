@@ -209,6 +209,31 @@ with right_column:
             },
         )
 
+        # ==========================================
+        # 🆕 ส่วนที่เพิ่มใหม่: ระบบจัดการ/ลบรายการ
+        # ==========================================
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("🗑️ ลบรายการทางการเงิน (คลิกที่นี่)"):
+            if len(st.session_state.transactions) > 0:
+                # สร้างตัวเลือกให้ผู้ใช้อ่านง่ายๆ
+                delete_options = {
+                    i: f"[{t['ประเภท']}] {t['วันที่']} - {t['หมวดหมู่']} : {t['จำนวนเงิน (บาท)']:,.2f} บาท ({t['รายละเอียด']})"
+                    for i, t in enumerate(st.session_state.transactions)
+                }
+
+                selected_idx = st.selectbox(
+                    "เลือกรายการที่ต้องการลบ:", 
+                    options=list(delete_options.keys()), 
+                    format_func=lambda x: delete_options[x]
+                )
+
+                if st.button("❌ ยืนยันการลบรายการนี้"):
+                    st.session_state.transactions.pop(selected_idx)
+                    st.rerun() # รีเฟรชหน้าเว็บอัตโนมัติเพื่ออัปเดตข้อมูลทั้งหมดทันที
+            else:
+                st.info("ไม่มีรายการให้ลบ")
+        # ==========================================
+
         expense_rows = [t for t in st.session_state.transactions if t["ประเภท"] == "รายจ่าย"]
 
         if expense_rows:
@@ -270,8 +295,5 @@ with right_column:
 
                     if forecast_30_days > 0:
                         st.info(f"📈 **พยากรณ์ล่วงหน้า:** จากพฤติกรรม {unique_days} วันที่ผ่านมา คาดการณ์ว่ารายจ่าย 30 วันข้างหน้าจะอยู่ที่ **{forecast_30_days:,.2f} บาท**")
-                        if forecast_30_days > total_income and total_income > 0:
-                            st.error("⚠️ คำเตือน: แนวโน้มค่าใช้จ่ายเดือนหน้าสูงกว่ารายรับ! แนะนำให้รัดเข็มขัดทันที")
-            # ----------------------------------------
     else:
         st.info("ยังไม่มีรายการ เริ่มต้นด้วยการบันทึกข้อมูลจากแบบฟอร์มด้านซ้าย")
