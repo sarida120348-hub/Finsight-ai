@@ -1,2 +1,4 @@
 streamlit
 pandas
+altair
+st-gsheets-connection  # ตัวเชื่อมต่อ Google Sheets อย่างเป็นทางการของ Streamlit
