@@ -17,19 +17,56 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🗄️ ฟังก์ชันจัดการ Google Sheets (แทนที่ .psv)
+# 🔐 ระบบยืนยันตัวตน (Authentication State)
+# ==========================================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+
+# --- หน้าจอ Login ---
+if not st.session_state.logged_in:
+    st.markdown("<br><br><h2 style='text-align: center; color: #176b87;'>🔐 เข้าสู่ระบบ FinSight AI</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #60758a;'>กรุณากรอกชื่อผู้ใช้งานเพื่อเข้าสู่พื้นที่จัดการการเงินส่วนตัวของคุณ</p>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        with st.form("login_form"):
+            user_input = st.text_input("ชื่อผู้ใช้งาน (Username)", placeholder="เช่น naphasarit")
+            password_input = st.text_input("รหัสผ่าน (Password)", type="password", placeholder="สำหรับเวอร์ชัน Prototype กรอกอะไรก็ได้ครับ")
+            submit_login = st.form_submit_button("เข้าสู่ระบบ / สมัครใช้งาน", width="stretch")
+
+            if submit_login:
+                if user_input and password_input:
+                    st.session_state.logged_in = True
+                    st.session_state.username = user_input.strip()
+                    st.rerun()
+                else:
+                    st.warning("⚠️ กรุณากรอกชื่อผู้ใช้งานและรหัสผ่านให้ครบถ้วน")
+
+    # หยุดการเรนเดอร์หน้าเว็บส่วนอื่นๆ หากยังไม่ Login
+    st.stop() 
+
+
+# ==========================================
+# 🗄️ ฟังก์ชันจัดการ Google Sheets (แยกตาม User)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_transactions_from_gsheets():
-    """ดึงข้อมูลจาก Google Sheets มาแปลงเป็นรูปแบบที่แอปใช้"""
+    """อ่านข้อมูลทั้งหมด แล้วกรองเอาเฉพาะข้อมูลของ User ที่ Login อยู่"""
     try:
-        # ดึงข้อมูลจาก Sheets (ttl=0 เพื่อไม่ให้จำค่าแคชเก่า)
-        df = conn.read(worksheet="Transactions", usecols=list(range(5)), ttl=0)
-        df = df.dropna(how="all") # ลบแถวที่ว่างเปล่าทิ้ง
+        # อ่านข้อมูล 6 คอลัมน์ (รวมถึง Username)
+        df = conn.read(worksheet="Transactions", usecols=list(range(6)), ttl=0).dropna(how="all")
+
+        # ตรวจสอบว่าแผ่นงานว่างหรือไม่มีคอลัมน์ Username
+        if df.empty or "Username" not in df.columns:
+            return []
+
+        # 🔑 กรองเอาเฉพาะข้อมูลที่ Username ตรงกับคนที่ Login
+        user_df = df[df["Username"] == st.session_state.username]
 
         transactions = []
-        for _, row in df.iterrows():
+        for _, row in user_df.iterrows():
             try:
                 dt = pd.to_datetime(row["วันที่"]).date()
             except:
@@ -44,136 +81,92 @@ def load_transactions_from_gsheets():
             })
         return transactions
     except Exception as e:
-        st.error(f"เชื่อมต่อ Google Sheets สำเร็จ แต่ไม่สามารถอ่านข้อมูลได้ (โปรดตรวจสอบว่าชื่อแผ่นงานคือ Transactions และมีหัวคอลัมน์ครบ 5 ช่อง): {e}")
+        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
         return []
 
-def save_transactions_to_gsheets(transactions_list):
-    """เขียนข้อมูลทั้งหมดทับลงไปใน Google Sheets"""
-    if not transactions_list:
-        df_to_save = pd.DataFrame(columns=["วันที่", "ประเภท", "หมวดหมู่", "จำนวนเงิน", "รายละเอียด"])
+def save_transactions_to_gsheets(user_transactions):
+    """โหลดข้อมูลทั้งหมด เอาข้อมูลเก่าของ User นี้ออก แล้วต่อท้ายด้วยข้อมูลอัปเดตใหม่"""
+    try:
+        all_data = conn.read(worksheet="Transactions", usecols=list(range(6)), ttl=0).dropna(how="all")
+    except:
+        all_data = pd.DataFrame(columns=["วันที่", "ประเภท", "หมวดหมู่", "จำนวนเงิน", "รายละเอียด", "Username"])
+
+    # 1. เอาข้อมูลของคนอื่นเก็บไว้ แต่ลบข้อมูลเดิมของ "ผู้ใช้ปัจจุบัน" ทิ้งไปก่อน
+    if not all_data.empty and "Username" in all_data.columns:
+        all_data = all_data[all_data["Username"] != st.session_state.username]
     else:
-        df_to_save = pd.DataFrame([{
+        all_data = pd.DataFrame(columns=["วันที่", "ประเภท", "หมวดหมู่", "จำนวนเงิน", "รายละเอียด", "Username"])
+
+    # 2. นำข้อมูลใหม่ที่ผู้ใช้อัปเดตล่าสุด มาประกอบร่าง (มีใส่ Username ต่อท้าย)
+    if user_transactions:
+        new_df = pd.DataFrame([{
             "วันที่": t["วันที่"].strftime("%Y-%m-%d"),
             "ประเภท": t["ประเภท"],
             "หมวดหมู่": t["หมวดหมู่"],
             "จำนวนเงิน": t["จำนวนเงิน (บาท)"],
-            "รายละเอียด": t["รายละเอียด"]
-        } for t in transactions_list])
+            "รายละเอียด": t["รายละเอียด"],
+            "Username": st.session_state.username  # 🔑 ใส่รหัสคนเขียนกำกับไว้
+        } for t in user_transactions])
 
-    # อัปเดตข้อมูลทับลงไป
-    conn.update(worksheet="Transactions", data=df_to_save)
+        # 3. นำข้อมูลคนอื่นมารวมกับข้อมูลใหม่ของผู้ใช้ปัจจุบัน
+        all_data = pd.concat([all_data, new_df], ignore_index=True)
+
+    # 4. อัปเดตทับลงไปใน Google Sheets ครั้งเดียว
+    conn.update(worksheet="Transactions", data=all_data)
     st.cache_data.clear()
 
 # ==========================================
-# 🎨 ตกแต่ง CSS และส่วนหัว (Hero Section)
+# 🎨 ตกแต่ง CSS
 # ==========================================
 st.markdown(
     """
     <style>
-    :root {
-        --ink: #12263a;
-        --muted: #60758a;
-        --brand: #176b87;
-        --brand-dark: #0e4f66;
-        --surface: #ffffff;
-        --line: #dce8ed;
-    }
+    :root { --ink: #12263a; --muted: #60758a; --brand: #176b87; --brand-dark: #0e4f66; --surface: #ffffff; --line: #dce8ed; }
     .stApp { background: #f5f8fa; }
-    .block-container {
-        max-width: 1240px;
-        padding-top: 3.25rem;
-        padding-bottom: 3rem;
-    }
+    .block-container { max-width: 1240px; padding-top: 3.25rem; padding-bottom: 3rem; }
     .hero { margin-bottom: 2rem; }
-    .eyebrow {
-        color: var(--brand);
-        font-size: 0.78rem;
-        font-weight: 700;
-        letter-spacing: 0.16em;
-        margin-bottom: 0.55rem;
-        text-transform: uppercase;
-    }
-    .hero h1 {
-        color: var(--ink);
-        font-size: clamp(2.25rem, 4vw, 3.7rem);
-        letter-spacing: -0.055em;
-        line-height: 1;
-        margin: 0 0 0.8rem;
-    }
-    .hero p {
-        color: var(--muted);
-        font-size: 1.04rem;
-        margin: 0;
-    }
-    [data-testid="stForm"], [data-testid="stDataFrame"], .summary-card {
-        background: var(--surface);
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        box-shadow: 0 10px 30px rgba(20, 58, 76, 0.05);
-    }
+    .eyebrow { color: var(--brand); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.16em; margin-bottom: 0.55rem; text-transform: uppercase; }
+    .hero h1 { color: var(--ink); font-size: clamp(2.25rem, 4vw, 3.7rem); letter-spacing: -0.055em; line-height: 1; margin: 0 0 0.8rem; }
+    .hero p { color: var(--muted); font-size: 1.04rem; margin: 0; }
+    [data-testid="stForm"], [data-testid="stDataFrame"], .summary-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 10px 30px rgba(20, 58, 76, 0.05); }
     [data-testid="stForm"] { padding: 1.45rem; }
-    .section-heading {
-        color: var(--ink);
-        font-size: 1.18rem;
-        font-weight: 700;
-        margin: 0 0 1rem;
-    }
-    .section-caption {
-        color: var(--muted);
-        font-size: 0.9rem;
-        margin: -0.55rem 0 1.25rem;
-    }
-    .summary-card {
-        display: flex;
-        gap: 1rem;
-        justify-content: space-between;
-        margin-bottom: 1rem;
-        padding: 1rem 1.15rem;
-    }
-    .summary-label {
-        color: var(--muted);
-        font-size: 0.78rem;
-        margin-bottom: 0.2rem;
-    }
-    .summary-value {
-        color: var(--ink);
-        font-size: 1.35rem;
-        font-weight: 700;
-    }
-    div.stButton > button, div[data-testid="stFormSubmitButton"] button {
-        background: var(--brand);
-        border: 0;
-        border-radius: 10px;
-        color: white;
-        font-weight: 700;
-        min-height: 2.85rem;
-        transition: background 120ms ease, transform 120ms ease;
-        width: 100%;
-    }
-    div[data-testid="stFormSubmitButton"] button:hover {
-        background: var(--brand-dark);
-        color: white;
-        transform: translateY(-1px);
-    }
+    .section-heading { color: var(--ink); font-size: 1.18rem; font-weight: 700; margin: 0 0 1rem; }
+    .section-caption { color: var(--muted); font-size: 0.9rem; margin: -0.55rem 0 1.25rem; }
+    .summary-card { display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 1rem; padding: 1rem 1.15rem; }
+    .summary-label { color: var(--muted); font-size: 0.78rem; margin-bottom: 0.2rem; }
+    .summary-value { color: var(--ink); font-size: 1.35rem; font-weight: 700; }
+    div.stButton > button, div[data-testid="stFormSubmitButton"] button { background: var(--brand); border: 0; border-radius: 10px; color: white; font-weight: 700; min-height: 2.85rem; transition: background 120ms ease, transform 120ms ease; width: 100%; }
+    div[data-testid="stFormSubmitButton"] button:hover { background: var(--brand-dark); color: white; transform: translateY(-1px); }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    """
-    <div class="hero">
-        <div class="eyebrow">Personal finance workspace</div>
-        <h1>FinSight AI</h1>
-        <p>บันทึกทุกความเคลื่อนไหวทางการเงินให้เป็นระเบียบในที่เดียว</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+# ==========================================
+# 🏠 โครงสร้างหน้าเว็บหลัก
+# ==========================================
 
-# โหลดข้อมูลจาก Google Sheets เมื่อเปิดเว็บ
+# โหลดข้อมูลเฉพาะของคน Login
 if "transactions" not in st.session_state:
     st.session_state.transactions = load_transactions_from_gsheets()
+
+col_hero, col_user = st.columns([3, 1])
+with col_hero:
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="eyebrow">Personal finance workspace</div>
+            <h1>FinSight AI</h1>
+            <p>บันทึกทุกความเคลื่อนไหวทางการเงินให้เป็นระเบียบในที่เดียว</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with col_user:
+    st.write(f"👤 ยินดีต้อนรับคุณ **{st.session_state.username}**")
+    if st.button("🚪 ออกจากระบบ", key="logout"):
+        st.session_state.clear()
+        st.rerun()
 
 categories = [
     "เงินเดือน", "รายได้เสริม", "อาหาร", "เดินทาง", 
@@ -208,9 +201,8 @@ with left_column:
                 "จำนวนเงิน (บาท)": amount,
                 "รายละเอียด": details.strip() or "-",
             })
-            # สั่งเซฟลง Google Sheets ทันที!
             save_transactions_to_gsheets(st.session_state.transactions)
-            st.success("บันทึกข้อมูลลงฐานข้อมูล Google Sheets สำเร็จ!")
+            st.success("บันทึกข้อมูลสำเร็จ!")
             st.rerun()
 
 # ==========================================
@@ -267,7 +259,6 @@ with right_column:
 
                 if st.button("❌ ยืนยันการลบรายการนี้"):
                     st.session_state.transactions.pop(selected_idx)
-                    # สั่งเซฟลง Google Sheets อัตโนมัติเมื่อกดลบ
                     save_transactions_to_gsheets(st.session_state.transactions)
                     st.rerun() 
             else:
@@ -303,7 +294,7 @@ with right_column:
             )
             st.altair_chart(pie_chart, use_container_width=True)
 
-            # --- AI Financial Advisor & Forecasting ---
+            # --- AI Financial Advisor ---
             st.markdown('<div class="section-heading" style="margin-top:2.5rem;">🤖 AI Financial Advisor & พยากรณ์แนวโน้ม</div>', unsafe_allow_html=True)
 
             if st.button("✨ วิเคราะห์พฤติกรรมการเงินด้วย AI", type="primary", use_container_width=True):
@@ -319,7 +310,7 @@ with right_column:
                     unique_days = len(set(t["วันที่"] for t in expense_rows))
                     forecast_30_days = (total_expense / unique_days * 30) if unique_days > 0 else 0
 
-                    st.success("✅ วิเคราะห์เสร็จสิ้น! นี่คือคำแนะนำสำหรับคุณ:")
+                    st.success(f"✅ วิเคราะห์เสร็จสิ้น! นี่คือคำแนะนำสำหรับคุณ {st.session_state.username}:")
 
                     st.info(f"💡 **วิเคราะห์รายจ่าย:** พบว่าหมวด **'{highest_cat}'** มีค่าใช้จ่ายสูงสุด ({highest_amt:,.2f} บาท) แนะนำให้ทบทวนงบส่วนนี้")
 
